@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 import torch
@@ -5,6 +6,7 @@ SEED = 1111
 torch.manual_seed(SEED)
 torch.backends.cudnn.deterministic = True
 
+""" Code to prepare dataset which turned out not to be needed
 from transformers import RobertaTokenizer
 from transformers import BertTokenizer
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -63,37 +65,61 @@ def prepare_data(df_e, df_ne, tokenizer):
     return inputs
 
 #inputs = prepare_data(df_e, df_ne)
+"""
 
-# Load and prepare datasets (two tsv-files in pandas corresponding to entailment and non-entailment for an NLI task)
-# Read the files metaphors/manual_e.tsv and metaphors/manual_ne.tsv
-df_e = pd.read_csv('metaphors/manual_e.tsv', sep='\t', names=['premise', 'hypothesis'])
-df_ne = pd.read_csv('metaphors/manual_ne.tsv', sep='\t', names=['premise', 'hypothesis'])
-
-df_e.head()
-
-# Convert dataframe  to a list with the two columns as pairs of tuples
-data_e = list(df_e.apply(lambda x: (x['premise'], x['hypothesis']), axis=1))
-data_ne = list(df_ne.apply(lambda x: (x['premise'], x['hypothesis']), axis=1))
-# Concatenate data lists
-data = data_e+data_ne
-
-print(len(data))
-
-# Make labels (numpy array)
-true_labels = np.array([1] * len(data_e) + [0] * len(data_ne))
-
-## Load model
+import pandas as pd
+import numpy as np
 from sentence_transformers import CrossEncoder
-model = CrossEncoder('cross-encoder/nli-deberta-base')
-scores = model.predict(data)
-
-#Convert scores to labels
-label_mapping = ['non-entailment', 'entailment', 'neutral']
-labels = [label_mapping[score_max] for score_max in scores.argmax(axis=1)]
-
-# Roll neutral and contradiction labels into one non-entailment label
-model_labels = np.array([1 if label == 'entailment' else 0 for label in labels])
-
-# Model evaluation
 from sklearn.metrics import classification_report
-print(classification_report(true_labels, model_labels))
+
+def process_nli_data(*dfs):
+    # Convert dataframes to lists of tuples
+    data = []
+    true_labels = []
+    
+    for i, df in enumerate(dfs):
+        data.extend(list(zip(df['premise'], df['hypothesis'])))
+        true_labels.extend([i] * len(df))
+    
+    # Load model
+    model = CrossEncoder('cross-encoder/nli-deberta-base')
+    
+    # Predict labels
+    scores = model.predict(data)
+    label_mapping = ['h1', 'h2', 'h3']
+    labels = [label_mapping[score_max] for score_max in scores.argmax(axis=1)]
+    
+    # Get unique labels
+    unique_labels = np.unique(true_labels)
+    
+    # Map labels to integers
+    label_to_int = {label: i for i, label in enumerate(unique_labels)}
+    model_labels = np.array([label_to_int[label] for label in labels])
+    
+    # Model evaluation
+    report = classification_report(true_labels, model_labels)
+    
+    return report
+
+# Define dataframes for multiple datasets
+dataset1_h1 = pd.read_csv('metaphors/manual_e1.tsv', sep='\t', names=['premise', 'hypothesis'])
+dataset1_h2 = pd.read_csv('metaphors/manual_ne1.tsv', sep='\t', names=['premise', 'hypothesis'])
+
+dataset2_df = pd.read_csv('hyperboles/hypo_nli.csv')
+# Transform dataset 2 into a two-column structure
+dataset2_h1 = dataset2_df[['premise', 'entailment']].copy()
+dataset2_h1.columns = ['premise', 'hypothesis']
+dataset2_h2 = dataset2_df[['premise', 'contradiction']].copy()
+dataset2_h2.columns = ['premise', 'hypothesis']
+dataset2_h3 = dataset2_df[['premise', 'neutral']].copy()
+dataset2_h3.columns = ['premise', 'hypothesis']
+
+# Process and evaluate dataset 1 (2 classes)
+dataset1_report = process_nli_data(dataset1_h1, dataset1_h2)
+print("Dataset 1 report:")
+print(dataset1_report)
+
+# Process and evaluate dataset 3 (2 classes)
+dataset2_report = process_nli_data(dataset2_h1, dataset2_h2, dataset2_h3)
+print("Dataset 2 report:")
+print(dataset2_report)
