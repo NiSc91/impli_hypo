@@ -1,4 +1,4 @@
-
+import pdb
 import pandas as pd
 import numpy as np
 import torch
@@ -73,28 +73,32 @@ from sentence_transformers import CrossEncoder
 from sklearn.metrics import classification_report
 
 def process_nli_data(*dfs):
+    """ Function takes a dataframe, wherein each one corresponds to an NLI pair.
+    If 2 classes, the order is: Entailment, non-entailment
+    If 3 classes, the order is: Contradiction, entailment, neutral
+    """
     # Convert dataframes to lists of tuples
-    data = []
-    true_labels = []
+    data = []; true_labels = []; num_classes = len(dfs)
     
     for i, df in enumerate(dfs):
         data.extend(list(zip(df['premise'], df['hypothesis'])))
         true_labels.extend([i] * len(df))
     
+    #pdb.set_trace()
     # Load model
     model = CrossEncoder('cross-encoder/nli-deberta-base')
-    
-    # Predict labels
     scores = model.predict(data)
-    label_mapping = ['h1', 'h2', 'h3']
-    labels = [label_mapping[score_max] for score_max in scores.argmax(axis=1)]
-    
-    # Get unique labels
-    unique_labels = np.unique(true_labels)
-    
-    # Map labels to integers
-    label_to_int = {label: i for i, label in enumerate(unique_labels)}
-    model_labels = np.array([label_to_int[label] for label in labels])
+    # Get attention weights
+    attention_weights = model.attention_weights(data, visualize=True)
+
+
+    #Convert scores to labels
+    #Assumes the order ['contradiction', 'entailment', 'neutral']
+    model_labels = scores.argmax(axis=1)
+
+    if num_classes == 2:
+        # Re-map model labels to two classes (non-entailment will be 0)
+        model_labels = np.array([0 if l == 2 else l for l in model_labels])
     
     # Model evaluation
     report = classification_report(true_labels, model_labels)
@@ -102,24 +106,26 @@ def process_nli_data(*dfs):
     return report
 
 # Define dataframes for multiple datasets
-dataset1_h1 = pd.read_csv('metaphors/manual_e1.tsv', sep='\t', names=['premise', 'hypothesis'])
-dataset1_h2 = pd.read_csv('metaphors/manual_ne1.tsv', sep='\t', names=['premise', 'hypothesis'])
+dataset1_entailment = pd.read_csv('metaphors/manual_e.tsv', sep='\t', names=['premise', 'hypothesis'])
+dataset1_non_entailment = pd.read_csv('metaphors/manual_ne.tsv', sep='\t', names=['premise', 'hypothesis'])
 
-dataset2_df = pd.read_csv('hyperboles/hypo_nli.csv')
+dataset2_df = pd.read_csv('hyperboles/hypo_NLI_V1.csv')
+dataset2_df.dropna(subset='neutral', inplace=True)
+
 # Transform dataset 2 into a two-column structure
-dataset2_h1 = dataset2_df[['premise', 'entailment']].copy()
-dataset2_h1.columns = ['premise', 'hypothesis']
-dataset2_h2 = dataset2_df[['premise', 'contradiction']].copy()
-dataset2_h2.columns = ['premise', 'hypothesis']
-dataset2_h3 = dataset2_df[['premise', 'neutral']].copy()
-dataset2_h3.columns = ['premise', 'hypothesis']
+dataset2_entailment = dataset2_df[['premise', 'entailment']].copy()
+dataset2_entailment.columns = ['premise', 'hypothesis']
+dataset2_contradiction = dataset2_df[['premise', 'contradiction']].copy()
+dataset2_contradiction.columns = ['premise', 'hypothesis']
+dataset2_neutral = dataset2_df[['premise', 'neutral']].copy()
+dataset2_neutral.columns = ['premise', 'hypothesis']
 
 # Process and evaluate dataset 1 (2 classes)
-dataset1_report = process_nli_data(dataset1_h1, dataset1_h2)
+dataset1_report = process_nli_data(dataset1_non_entailment, dataset1_entailment)
 print("Dataset 1 report:")
 print(dataset1_report)
 
-# Process and evaluate dataset 3 (2 classes)
-dataset2_report = process_nli_data(dataset2_h1, dataset2_h2, dataset2_h3)
+# Process and evaluate dataset 2 (2 classes)
+dataset2_report = process_nli_data(dataset2_contradiction, dataset2_entailment, dataset2_neutral)
 print("Dataset 2 report:")
 print(dataset2_report)
