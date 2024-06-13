@@ -1,0 +1,67 @@
+import pandas as pd
+import numpy as np
+import torch
+SEED = 1111
+torch.manual_seed(SEED)
+torch.backends.cudnn.deterministic = True
+
+""" Code to prepare dataset which turned out not to be needed
+from transformers import RobertaTokenizer
+from transformers import BertTokenizer
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+#len(tokenizer)
+
+cls_token = tokenizer.cls_token
+sep_token = tokenizer.sep_token
+pad_token = tokenizer.pad_token
+unk_token = tokenizer.unk_token
+max_input_length = 256
+
+def tokenize_bert(sentence):
+    tokens = tokenizer.tokenize(sentence) 
+    return tokens
+
+def split_and_cut(sentence):
+    tokens = sentence.strip().split(" ")
+    tokens = tokens[:max_input_length]
+    return tokens
+
+def trim_sentence(sent):
+    try:
+        sent = sent.split()
+        sent = sent[:128]
+        return " ".join(sent)
+    except:
+        return sent
+
+def prepare_data(df_e, df_ne, tokenizer):
+    inputs = []
+    labels = []
+
+    for i, row in df_e.iterrows():
+        premise = row['premise']
+        hypothesis = row['hypothesis']
+        label = 1 # entailment
+
+        tokens_a = tokenizer.tokenize(premise)
+        tokens_b = tokenizer.tokenize(hypothesis)
+        input_ids = tokenizer.convert_tokens_to_ids(tokenizer.cls_token + tokens_a + tokenizer.sep_token + tokens_b)
+        attention_mask = [1] * len(input_ids)
+
+        inputs.append({"input_ids": input_ids, "attention_mask": attention_mask, "labels": label})
+
+    for i, row in df_ne.iterrows():
+        premise = row['premise']
+        hypothesis = row['hypothesis']
+        label = 0 # not entailment
+        tokens_a = tokenizer.tokenize(premise)
+        tokens_b = tokenizer.tokenize(hypothesis)
+        input_ids = tokenizer.convert_tokens_to_ids(tokenizer.cls_token + tokens_a + tokenizer.sep_token + tokens_b)
+        attention_mask = [1] * len(input_ids)
+
+        inputs.append({"input_ids": input_ids, "attention_mask": attention_mask, "labels": label})
+
+    return inputs
+
+#inputs = prepare_data(df_e, df_ne)
+"""

@@ -1,100 +1,139 @@
 import pdb
 import pandas as pd
 import numpy as np
-import torch
-SEED = 1111
-torch.manual_seed(SEED)
-torch.backends.cudnn.deterministic = True
-
-""" Code to prepare dataset which turned out not to be needed
-from transformers import RobertaTokenizer
-from transformers import BertTokenizer
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-#len(tokenizer)
-
-cls_token = tokenizer.cls_token
-sep_token = tokenizer.sep_token
-pad_token = tokenizer.pad_token
-unk_token = tokenizer.unk_token
-max_input_length = 256
-
-def tokenize_bert(sentence):
-    tokens = tokenizer.tokenize(sentence) 
-    return tokens
-
-def split_and_cut(sentence):
-    tokens = sentence.strip().split(" ")
-    tokens = tokens[:max_input_length]
-    return tokens
-
-def trim_sentence(sent):
-    try:
-        sent = sent.split()
-        sent = sent[:128]
-        return " ".join(sent)
-    except:
-        return sent
-
-def prepare_data(df_e, df_ne, tokenizer):
-    inputs = []
-    labels = []
-
-    for i, row in df_e.iterrows():
-        premise = row['premise']
-        hypothesis = row['hypothesis']
-        label = 1 # entailment
-
-        tokens_a = tokenizer.tokenize(premise)
-        tokens_b = tokenizer.tokenize(hypothesis)
-        input_ids = tokenizer.convert_tokens_to_ids(tokenizer.cls_token + tokens_a + tokenizer.sep_token + tokens_b)
-        attention_mask = [1] * len(input_ids)
-
-        inputs.append({"input_ids": input_ids, "attention_mask": attention_mask, "labels": label})
-
-    for i, row in df_ne.iterrows():
-        premise = row['premise']
-        hypothesis = row['hypothesis']
-        label = 0 # not entailment
-        tokens_a = tokenizer.tokenize(premise)
-        tokens_b = tokenizer.tokenize(hypothesis)
-        input_ids = tokenizer.convert_tokens_to_ids(tokenizer.cls_token + tokens_a + tokenizer.sep_token + tokens_b)
-        attention_mask = [1] * len(input_ids)
-
-        inputs.append({"input_ids": input_ids, "attention_mask": attention_mask, "labels": label})
-
-    return inputs
-
-#inputs = prepare_data(df_e, df_ne)
-"""
-
-import pandas as pd
-import numpy as np
-from sentence_transformers import CrossEncoder
+from sentence_transformers import SentenceTransformer, CrossEncoder, InputExample, losses
+# Arguments used for new methods of sentence_transformers to train/fine-tune (not implemented yet)
+# import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
 from sklearn.metrics import classification_report
+from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.optim import AdamW
+import torch.nn as nn
 
-def process_nli_data(*dfs):
-    """ Function takes a dataframe, wherein each one corresponds to an NLI pair.
+class NLIDataset(Dataset):
+    def __init__(self, premise_list, hypothesis_list, labels):
+        self.premise_list = premise_list
+        self.hypothesis_list = hypothesis_list
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        premise = self.premise_list[idx]
+        hypothesis = self.hypothesis_list[idx]
+        label = self.labels[idx]
+        return InputExample(texts=[premise, hypothesis], label=label)
+
+def train(model, train_dataloader, output_path="models/", num_epochs=20):
+    # Define the loss function
+    train_loss = losses.SoftmaxLoss(model=model, num_labels=2)
+    
+    model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=10, warmup_steps=100, output_path="finetuned_models/NLIDebertaImpli")
+    
+    return model
+
+def new_train(model, train_dataloader):
+    
+    ## Specify training arguments
+    args = SentenceTransformerTrainingArguments(
+    # Required parameter:
+    output_dir="models/NLIDebertaBaseImpli",
+    # Optional training parameters:
+    num_train_epochs=10,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    learning_rate=2e-5,
+    warmup_ratio=0.1,
+    fp16=True,  # Set to False if you get an error that your GPU can't run on FP16
+    bf16=False,  # Set to True if you have a GPU that supports BF16
+    batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
+    # Optional tracking/debugging parameters:
+    eval_strategy="steps",
+    eval_steps=100,
+    save_strategy="steps",
+    save_steps=100,
+    save_total_limit=2,
+    logging_steps=100,
+    run_name="mpnet-base-all-nli-triplet",  # Will be used in W&B if `wandb` is installed
+    )
+    
+    ## Train model
+    trainer = SentenceTransformerTrainer(
+    model=model,
+    args=args,
+    train_dataset=train_dataset,
+    loss=loss)
+    
+    trainer.train()
+    model.save_pretrained("models/NLIDebertaBaseImpli/final")
+    
+    return model
+
+
+def train_pytorch(model, train_dataloader, num_epochs=20, eval_dataloader=None):
+    # Specify optimizer and loss function
+    optimizer = AdamW(model.parameters(), lr=2e-5)
+    loss_function = nn.CrossEntropyLoss()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.train()
+
+    for epoch in range(num_epochs):
+        total_loss = 0
+
+        for batch in train_dataloader:
+            batch = {k: v.to(device) for k, v in batch.items()}
+
+            optimizer.zero_grad()
+            outputs = model(**batch)
+            loss = loss_function(outputs.logits, batch["labels"])
+            total_loss += loss.item()
+
+            loss.backward()
+            optimizer.step()
+
+        average_loss = total_loss / len(train_dataloader)
+        print(f"Epoch {epoch+1}/{num_epochs} - Average Loss: {average_loss:.4f}")
+
+    # Evaluate the model if eval_dataloader is provided
+    if eval_dataloader is not None:
+        model.eval()
+        eval_losses = []
+        eval_labels = []
+        eval_preds = []
+
+        for batch in eval_dataloader:
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with torch.no_grad():
+                outputs = model(**batch)
+                eval_losses.append(loss_function(outputs.logits, batch["labels"]).item())
+                eval_labels.extend(batch["labels"].cpu().numpy())
+                eval_preds.extend(outputs.logits.argmax(dim=1).cpu().numpy())
+
+        eval_loss = np.mean(eval_losses)
+        eval_report = classification_report(eval_labels, eval_preds)
+        print(f"Evaluation Loss: {eval_loss:.4f}")
+        print("Evaluation Report:")
+        print(eval_report)
+
+    return model
+
+def test(model, data, true_labels):
+    """ Function takes the model and dataframes, wherein each one corresponds to an NLI pair.
     If 2 classes, the order is: Entailment, non-entailment
     If 3 classes, the order is: Contradiction, entailment, neutral
     """
-    # Convert dataframes to lists of tuples
-    data = []; true_labels = []; num_classes = len(dfs)
     
-    for i, df in enumerate(dfs):
-        data.extend(list(zip(df['premise'], df['hypothesis'])))
-        true_labels.extend([i] * len(df))
-    
-    #pdb.set_trace()
-    # Load model
-    model = CrossEncoder('cross-encoder/nli-deberta-base')
     scores = model.predict(data)
     # Get attention weights
-    attention_weights = model.attention_weights(data, visualize=True)
-
+    #attention_weights = model.attention_weights(data, visualize=True)
 
     #Convert scores to labels
     #Assumes the order ['contradiction', 'entailment', 'neutral']
     model_labels = scores.argmax(axis=1)
+    num_classes = len(data)
 
     if num_classes == 2:
         # Re-map model labels to two classes (non-entailment will be 0)
@@ -105,10 +144,22 @@ def process_nli_data(*dfs):
     
     return report
 
+def convert_data(*dfs):
+    # Convert dataframes to lists of tuples
+    data = []; true_labels = []; num_classes = len(dfs)
+    
+    for i, df in enumerate(dfs):
+        data.extend(list(zip(df['premise'], df['hypothesis'])))
+        true_labels.extend([i] * len(df))
+
+    return data, true_labels
+
+# Load model
+model = CrossEncoder('cross-encoder/nli-deberta-v3-base')
+
 # Define dataframes for multiple datasets
 dataset1_entailment = pd.read_csv('metaphors/manual_e.tsv', sep='\t', names=['premise', 'hypothesis'])
 dataset1_non_entailment = pd.read_csv('metaphors/manual_ne.tsv', sep='\t', names=['premise', 'hypothesis'])
-
 dataset2_df = pd.read_csv('hyperboles/hypo_NLI_V1.csv')
 dataset2_df.dropna(subset='neutral', inplace=True)
 
@@ -120,12 +171,28 @@ dataset2_contradiction.columns = ['premise', 'hypothesis']
 dataset2_neutral = dataset2_df[['premise', 'neutral']].copy()
 dataset2_neutral.columns = ['premise', 'hypothesis']
 
+# Combine contradiction and neutral into a single non-entailment column
+dataset2_non_entailment = pd.concat([
+    dataset2_df[['premise', 'contradiction']].rename(columns={'contradiction': 'hypothesis'}),
+    dataset2_df[['premise', 'neutral']].rename(columns={'neutral': 'hypothesis'})
+], ignore_index=True)
+
 # Process and evaluate dataset 1 (2 classes)
-dataset1_report = process_nli_data(dataset1_non_entailment, dataset1_entailment)
-print("Dataset 1 report:")
-print(dataset1_report)
+#dataset1_report = nli(model, dataset1_non_entailment, dataset1_entailment, eval=True)
+# Process and fine-tune on metaphor dataset
+train_data, train_labels = convert_data(dataset1_non_entailment, dataset1_entailment)
+# Make DataLoder object
+dataset = NLIDataset([pair[0] for pair in train_data], [pair[1] for pair in train_data], train_labels)
+train_dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+# Fine-tune model
+new_model = train(model, train_dataloader)
 
 # Process and evaluate dataset 2 (2 classes)
-dataset2_report = process_nli_data(dataset2_contradiction, dataset2_entailment, dataset2_neutral)
-print("Dataset 2 report:")
+#test_data, test_labels = convert_data(dataset2_contradiction, dataset2_entailment, dataset2_neutral)
+test_data, test_labels = convert_data(dataset2_non_entailment, dataset2_entailment)
+
+dataset2_report =test(model, test_data, test_labels)
+dataset2_finetuned_report = test(new_model, test_data, test_labels)
+
+#print("Dataset 2 report:")
 print(dataset2_report)
