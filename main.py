@@ -25,9 +25,9 @@ class NLIDataset(Dataset):
         label = self.labels[idx]
         return InputExample(texts=[premise, hypothesis], label=label)
 
-def train(model, train_dataloader, output_path="models/", num_epochs=20):
+def depricated_train(model, train_dataloader, output_path="models/", num_epochs=20):
     # Define the loss function
-    train_loss = losses.SoftmaxLoss(model=model, num_labels=2)
+    train_loss = losses.SoftmaxLoss(model=model, sentence_embedding_dimension=model.get_sentence_embedding_dimension(), num_labels=2) ## Problem with .get_sentence_embedding_dim attribute, which does not exist for CrossEncoder models
     
     model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=10, warmup_steps=100, output_path="finetuned_models/NLIDebertaImpli")
     
