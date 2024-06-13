@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer, CrossEncoder, InputExample, losses
 # Arguments used for new methods of sentence_transformers to train/fine-tune (not implemented yet)
-# import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
+from sentence_transformers import SentenceTransformerTrainer, SentenceTransformerTrainingArguments
 from sklearn.metrics import classification_report
 from torch.utils.data import Dataset, DataLoader
 import torch
@@ -35,6 +35,9 @@ def depricated_train(model, train_dataloader, output_path="models/", num_epochs=
 
 def new_train(model, train_dataloader):
     
+    ## Specify training loss
+    loss = losses.CoSENTLoss(model)
+
     ## Specify training arguments
     args = SentenceTransformerTrainingArguments(
     # Required parameter:
@@ -47,7 +50,7 @@ def new_train(model, train_dataloader):
     warmup_ratio=0.1,
     fp16=True,  # Set to False if you get an error that your GPU can't run on FP16
     bf16=False,  # Set to True if you have a GPU that supports BF16
-    batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
+    #batch_sampler=BatchSamplers.NO_DUPLICATES,  # losses that use "in-batch negatives" benefit from no duplicates
     # Optional tracking/debugging parameters:
     eval_strategy="steps",
     eval_steps=100,
@@ -62,14 +65,13 @@ def new_train(model, train_dataloader):
     trainer = SentenceTransformerTrainer(
     model=model,
     args=args,
-    train_dataset=train_dataset,
+    train_dataset=train_dataloader,
     loss=loss)
     
     trainer.train()
     model.save_pretrained("models/NLIDebertaBaseImpli/final")
     
     return model
-
 
 def train_pytorch(model, train_dataloader, num_epochs=20, eval_dataloader=None):
     # Specify optimizer and loss function
@@ -185,7 +187,7 @@ train_data, train_labels = convert_data(dataset1_non_entailment, dataset1_entail
 dataset = NLIDataset([pair[0] for pair in train_data], [pair[1] for pair in train_data], train_labels)
 train_dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 # Fine-tune model
-new_model = train(model, train_dataloader)
+new_model = new_train(model, train_dataloader)
 
 # Process and evaluate dataset 2 (2 classes)
 #test_data, test_labels = convert_data(dataset2_contradiction, dataset2_entailment, dataset2_neutral)
