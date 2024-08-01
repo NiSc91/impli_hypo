@@ -27,9 +27,9 @@ class NLIDataset(Dataset):
 
 def depricated_train(model, train_dataloader, output_path="models/", num_epochs=20):
     # Define the loss function
-    train_loss = losses.SoftmaxLoss(model=model, sentence_embedding_dimension=model.get_sentence_embedding_dimension(), num_labels=2) ## Problem with .get_sentence_embedding_dim attribute, which does not exist for CrossEncoder models
+    #train_loss = losses.SoftmaxLoss(model=model, sentence_embedding_dimension=model.get_sentence_embedding_dimension(), num_labels=2) ## Problem with .get_sentence_embedding_dim attribute, which does not exist for CrossEncoder models
     
-    model.fit(train_objectives=[(train_dataloader, train_loss)], epochs=10, warmup_steps=100, output_path="finetuned_models/NLIDebertaImpli")
+    model.fit(train_dataloader, epochs=10, warmup_steps=100, output_path="finetuned_models/NLIDebertaImpli")
     
     return model
 
@@ -187,14 +187,15 @@ train_data, train_labels = convert_data(dataset1_non_entailment, dataset1_entail
 dataset = NLIDataset([pair[0] for pair in train_data], [pair[1] for pair in train_data], train_labels)
 train_dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 # Fine-tune model
-new_model = new_train(model, train_dataloader)
+#new_model = new_train(model, train_dataloader)
+#new_model = depricated_train(model, train_dataloader)
 
 # Process and evaluate dataset 2 (2 classes)
 #test_data, test_labels = convert_data(dataset2_contradiction, dataset2_entailment, dataset2_neutral)
 test_data, test_labels = convert_data(dataset2_non_entailment, dataset2_entailment)
 
 dataset2_report =test(model, test_data, test_labels)
-dataset2_finetuned_report = test(new_model, test_data, test_labels)
+#dataset2_finetuned_report = test(new_model, test_data, test_labels)
 
 #print("Dataset 2 report:")
 print(dataset2_report)
